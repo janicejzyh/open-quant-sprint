@@ -9,6 +9,8 @@ def leader_flow_impulse(
     df: pd.DataFrame, span: int = 12
 ) -> pd.Series:
     """Return smoothed BTC/ETH signed flow, aligned with df.index.
+
+    NaN at an hour without one BTC and one ETH row.
     """
     if (
         not isinstance(span, int)
@@ -38,10 +40,12 @@ def leader_flow_impulse(
         columns=["BTCUSDT", "ETHUSDT"],
         fill_value=0,
     )
-    if not counts.eq(1).all().all():
+    if counts.gt(1).any().any():
         raise ValueError(
-            "Each timestamp requires one BTC and one ETH row"
+            "Each timestamp allows at most one BTC and one ETH row"
         )
+    # An hour without both leaders gets NaN; the EWM decays across it.
+    complete = counts.eq(1).all(axis=1)
 
     leaders["signed_quote"] = (
         2.0 * leaders["taker_buy_quote_volume"]
@@ -58,11 +62,13 @@ def leader_flow_impulse(
         )
     ).fillna(0.0)
 
+    raw = raw.reindex(complete.index).where(complete).sort_index()
+
     smooth = raw.ewm(
         span=span,
         adjust=True,
         min_periods=1,
-    ).mean()
+    ).mean().where(raw.notna())
 
     return (
         df["timestamp"]

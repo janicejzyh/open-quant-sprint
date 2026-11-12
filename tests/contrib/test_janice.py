@@ -151,9 +151,34 @@ def test_zero_volume():
     assert leader_flow_impulse(df).eq(0.0).all()
 
 
-def test_missing_leader_raises():
+def test_missing_leader_hour_is_nan_and_decays():
+    df, raw_values = make_varying_panel()
+    gap = df["timestamp"].unique()[3]
+    dropped = df.loc[
+        ~(df["timestamp"].eq(gap) & df["symbol"].eq("ETHUSDT"))
+    ]
+    result = leader_flow_impulse(dropped, span=3)
+
+    assert result[dropped["timestamp"].eq(gap)].isna().all()
+
+    raw = pd.Series(raw_values, dtype=float)
+    raw[3] = np.nan
+    expected = raw.ewm(span=3, adjust=True, min_periods=1).mean()
+    expected[3] = np.nan
+    actual = result.groupby(dropped["timestamp"]).first()
+    np.testing.assert_allclose(actual.to_numpy(), expected.to_numpy())
+
+
+def test_missing_leader_everywhere_is_all_nan():
     df = make_panel()
     df = df.loc[df["symbol"].ne("BTCUSDT")]
 
-    with pytest.raises(ValueError, match="one BTC"):
+    assert leader_flow_impulse(df).isna().all()
+
+
+def test_duplicate_leader_row_raises():
+    df = make_panel()
+    df = pd.concat([df, df.iloc[[0]]])
+
+    with pytest.raises(ValueError, match="at most one"):
         leader_flow_impulse(df)
